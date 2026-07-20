@@ -1,25 +1,27 @@
 """Google Sheets integration service.
 
-Handles authentication, reading data from the Food_Log and Daily_Targets tabs,
-renames columns to match internal keys, and provides fallback mock data
-when credentials are unavailable.
+Handles authentication, reading data from the Food_Log, Daily_Targets,
+and Body_Metrics tabs, renames columns to match internal keys, and
+provides fallback mock data when credentials are unavailable.
 """
 
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 
 import pandas as pd
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
-from gspread.exceptions import APIError, SpreadsheetNotFound
+from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 
 from config.nutrients import (
     FOOD_LOG_COLUMN_MAP,
     REQUIRED_INTERNAL_COLUMNS,
     DAILY_TARGETS_COLUMNS,
+    DEFAULT_NUTRIENTS,
 )
+from config.body_metrics import BODY_METRICS_COLUMNS, DEFAULT_BODY_METRICS
 from utils.date_utils import format_date
 
 # Google Sheets scope
@@ -42,10 +44,7 @@ def _get_credentials() -> Optional[Credentials]:
         if not secrets:
             return None
 
-        # gspread expects a dict with specific keys; Streamlit secrets
-        # are parsed as a nested dict. We reconstruct the service-account JSON.
         creds_info = dict(secrets)
-        # Ensure private_key has proper newlines
         if "private_key" in creds_info:
             creds_info["private_key"] = creds_info["private_key"].replace("\\n", "\n")
 
@@ -64,14 +63,15 @@ def _get_sheet_id() -> Optional[str]:
 
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner="Fetching data from Google Sheets...")
-def _fetch_sheet_data(sheet_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Fetch Food_Log and Daily_Targets data from Google Sheets.
+def _fetch_sheet_data(sheet_id: str) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[pd.DataFrame]]:
+    """Fetch Food_Log, Daily_Targets, and Body_Metrics data from Google Sheets.
 
     Args:
         sheet_id: The Google Sheet document ID.
 
     Returns:
-        Tuple of (food_log_df, daily_targets_df).
+        Tuple of (food_log_df, daily_targets_df, body_metrics_df).
+        body_metrics_df may be None if the sheet tab does not exist.
 
     Raises:
         Exception: If the sheet cannot be accessed or parsed.
@@ -83,31 +83,29 @@ def _fetch_sheet_data(sheet_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(sheet_id)
 
-    # Read Food_Log
+    # ─── Read Food_Log ───
     food_log_ws = spreadsheet.worksheet("Food_Log")
     food_log_data = food_log_ws.get_all_records()
     food_log_df = pd.DataFrame(food_log_data)
 
-    # Rename user columns to internal keys
     food_log_df.rename(columns=FOOD_LOG_COLUMN_MAP, inplace=True)
 
-    # Add any missing nutrient columns with 0
     for col in REQUIRED_INTERNAL_COLUMNS:
         if col not in food_log_df.columns:
             food_log_df[col] = 0.0
 
-    # Validate only truly required columns (Date, Meal, Food, Quantity_g)
     missing_required = [col for col in ["Date", "Meal", "Food", "Quantity_g"] if col not in food_log_df.columns]
     if missing_required:
-        raise ValueError(f"Food_Log sheet missing required columns after mapping: {missing_required}. "
-                         f"Please check your column headers match the expected format.")
+        raise ValueError(
+            f"Food_Log sheet missing required columns after mapping: {missing_required}. "
+            f"Please check your column headers match the expected format."
+        )
 
-    # Convert numeric columns to float
     numeric_cols = [c for c in REQUIRED_INTERNAL_COLUMNS if c not in ["Date", "Meal", "Food"]]
     for col in numeric_cols:
         food_log_df[col] = pd.to_numeric(food_log_df[col], errors="coerce").fillna(0.0)
 
-    # Read Daily_Targets
+    # ─── Read Daily_Targets ───
     targets_ws = spreadsheet.worksheet("Daily_Targets")
     targets_data = targets_ws.get_all_records()
     targets_df = pd.DataFrame(targets_data)
@@ -116,84 +114,116 @@ def _fetch_sheet_data(sheet_id: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     if missing_targets:
         raise ValueError(f"Daily_Targets sheet missing columns: {missing_targets}")
 
-    return food_log_df, targets_df
+    # ─── Read Body_Metrics (optional) ───
+    body_metrics_df = None
+    try:
+        bm_ws = spreadsheet.worksheet("Body_Metrics")
+        bm_data = bm_ws.get_all_records()
+        body_metrics_df = pd.DataFrame(bm_data)
+
+        # Ensure expected columns exist
+        for col in BODY_METRICS_COLUMNS:
+            if col not in body_metrics_df.columns:
+                body_metrics_df[col] = 0.0
+
+        # Convert numeric columns
+        bm_numeric = [c for c in BODY_METRICS_COLUMNS if c != "Date"]
+        for col in bm_numeric:
+            body_metrics_df[col] = pd.to_numeric(body_metrics_df[col], errors="coerce")
+
+    except WorksheetNotFound:
+        body_metrics_df = None
+
+    return food_log_df, targets_df, body_metrics_df
 
 
-def _generate_mock_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
+def _generate_mock_data() -> Tuple[pd.DataFrame, pd.DataFrame, Optional[pd.DataFrame]]:
     """Generate realistic mock data for local development / demo.
 
     Returns:
-        Tuple of (food_log_df, daily_targets_df).
+        Tuple of (food_log_df, daily_targets_df, body_metrics_df).
     """
-    from datetime import timedelta
     from utils.date_utils import get_today_date_india
-    from config.nutrients import DEFAULT_NUTRIENTS
 
     today = get_today_date_india()
 
-    # Mock food log for today and past 6 days
+    # ─── Mock food log ───
     mock_entries = []
-    meals = ["Breakfast", "Lunch", "Snacks", "Dinner", "Other"]
-
     foods = {
         "Breakfast": [
-            ("Oatmeal with berries", 250, 150, 5, 27, 3, 4, 8, 1, 0, 0, 2, 10, 1, 30, 0.5, 0, 0, 0, 0, 5, 0, 0.5, 1, 20, 0.1, 200),
-            ("Boiled eggs", 100, 140, 12, 1, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 50),
+            ("Oatmeal with berries", 250, 150, 5, 27, 3, 4, 8, 2, 1, 0, 0.5, 1.5, 0.8, 0.3, 1.2, 0, 0, 2, 10, 1, 30, 0.5, 0, 0, 0, 0, 5, 0, 0.5, 1, 20, 0.1, 200, 0.1, 0.05, 0.5, 0.1, 25, 0.5, 30),
+            ("Boiled eggs", 100, 140, 12, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6, 0, 50),
         ],
         "Lunch": [
-            ("Grilled chicken breast", 150, 248, 46, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            ("Brown rice", 200, 248, 5, 52, 2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            ("Mixed vegetables", 150, 80, 3, 15, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ("Grilled chicken breast", 150, 248, 46, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.3, 0, 0),
+            ("Brown rice", 200, 248, 5, 52, 2, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ("Mixed vegetables", 150, 80, 3, 15, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
         ],
         "Snacks": [
-            ("Greek yogurt", 150, 100, 15, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            ("Almonds", 30, 180, 6, 6, 15, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ("Greek yogurt", 150, 100, 15, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ("Almonds", 30, 180, 6, 6, 15, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
         ],
         "Dinner": [
-            ("Salmon fillet", 150, 350, 35, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            ("Quinoa", 150, 180, 6, 30, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
-            ("Steamed broccoli", 100, 55, 4, 11, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ("Salmon fillet", 150, 350, 35, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ("Quinoa", 150, 180, 6, 30, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+            ("Steamed broccoli", 100, 55, 4, 11, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
         ],
     }
 
-    for day_offset in range(7):
+    for day_offset in range(90):
         date = today - timedelta(days=day_offset)
         date_str = format_date(date)
         for meal, food_list in foods.items():
             for food_tuple in food_list:
-                mock_entries.append({
+                entry = {
                     "Date": date_str,
                     "Meal": meal,
                     "Food": food_tuple[0],
                     "Quantity_g": food_tuple[1],
-                    "Calories_kcal": food_tuple[2] + (day_offset * 10),
+                    "Calories_kcal": food_tuple[2] + (day_offset % 5) * 15,
                     "Protein_g": food_tuple[3],
                     "Carbs_g": food_tuple[4],
                     "Fat_g": food_tuple[5],
                     "Fiber_g": food_tuple[6],
                     "Sugar_g": food_tuple[7],
-                    "Saturated_Fat_g": food_tuple[8],
-                    "Cholesterol_mg": food_tuple[9],
-                    "Sodium_mg": food_tuple[10],
-                    "Calcium_mg": food_tuple[11],
-                    "Iron_mg": food_tuple[12],
-                    "Magnesium_mg": food_tuple[13],
-                    "Potassium_mg": food_tuple[14],
-                    "Zinc_mg": food_tuple[15],
-                    "Vitamin_A_mcg": food_tuple[16],
-                    "Vitamin_B12_mcg": food_tuple[17],
-                    "Vitamin_C_mg": food_tuple[18],
-                    "Vitamin_D_mcg": food_tuple[19],
-                    "Vitamin_E_mg": food_tuple[20],
-                    "Vitamin_K_mcg": food_tuple[21],
-                    "Folate_mcg": food_tuple[22],
-                    "Omega_3_g": food_tuple[23],
-                    "Water_ml": food_tuple[24],
-                })
+                    "Added_Sugar_g": food_tuple[8],
+                    "Saturated_Fat_g": food_tuple[9],
+                    "Trans_Fat_g": food_tuple[10],
+                    "Mono_Fat_g": food_tuple[11],
+                    "Poly_Fat_g": food_tuple[12],
+                    "Omega_3_g": food_tuple[13],
+                    "Omega_6_g": food_tuple[14],
+                    "Cholesterol_mg": food_tuple[15],
+                    "Sodium_mg": food_tuple[16],
+                    "Potassium_mg": food_tuple[17],
+                    "Calcium_mg": food_tuple[18],
+                    "Iron_mg": food_tuple[19],
+                    "Magnesium_mg": food_tuple[20],
+                    "Phosphorus_mg": food_tuple[21],
+                    "Zinc_mg": food_tuple[22],
+                    "Copper_mg": food_tuple[23],
+                    "Manganese_mg": food_tuple[24],
+                    "Selenium_mcg": food_tuple[25],
+                    "Iodine_mcg": food_tuple[26],
+                    "Vitamin_A_mcg": food_tuple[27],
+                    "Vitamin_B12_mcg": food_tuple[28],
+                    "Vitamin_C_mg": food_tuple[29],
+                    "Vitamin_D_mcg": food_tuple[30],
+                    "Vitamin_E_mg": food_tuple[31],
+                    "Vitamin_K_mcg": food_tuple[32],
+                    "Thiamin_mg": food_tuple[33],
+                    "Riboflavin_mg": food_tuple[34],
+                    "Niacin_mg": food_tuple[35],
+                    "Vitamin_B6_mg": food_tuple[36],
+                    "Folate_mcg": food_tuple[37],
+                    "Choline_mg": food_tuple[38],
+                    "Water_ml": food_tuple[39],
+                }
+                mock_entries.append(entry)
 
     food_log_df = pd.DataFrame(mock_entries)
 
-    # Mock daily targets
+    # ─── Mock daily targets ───
     targets_data = []
     for key, config in DEFAULT_NUTRIENTS.items():
         targets_data.append({
@@ -204,18 +234,55 @@ def _generate_mock_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
         })
     targets_df = pd.DataFrame(targets_data)
 
-    return food_log_df, targets_df
+    # ─── Mock body metrics ───
+    bm_entries = []
+    base_weight = 72.0
+    base_bf = 18.0
+    base_muscle = 52.0
+    for day_offset in range(90):
+        date = today - timedelta(days=day_offset)
+        # Simulate slow weight loss and body recomposition
+        progress = day_offset * 0.03
+        weight = max(base_weight - progress + (day_offset % 7) * 0.2, 60)
+        bf = max(base_bf - progress * 0.15 + (day_offset % 7) * 0.1, 10)
+        muscle = min(base_muscle + progress * 0.05, 60)
+        bmi = weight / (1.75 ** 2)
+        waist = 88 - progress * 0.3 + (day_offset % 7) * 0.3
+        visceral = max(10 - progress * 0.08, 4)
+        bone = 3.2
+        water = 52 + (day_offset % 7) * 0.2
+        bmr = 1700 - progress * 2 + (day_offset % 7) * 5
+        subcutaneous = max(bf * 0.7, 7)
+
+        bm_entries.append({
+            "Date": format_date(date),
+            "Weight_kg": round(weight, 1),
+            "Body_Fat_pct": round(bf, 1),
+            "Muscle_Mass_kg": round(muscle, 1),
+            "BMI": round(bmi, 1),
+            "Waist_cm": round(waist, 1),
+            "Visceral_Fat": round(visceral, 0),
+            "Bone_Mass_kg": bone,
+            "Water_pct": round(water, 1),
+            "BMR_kcal": round(bmr, 0),
+            "Subcutaneous_Fat_pct": round(subcutaneous, 1),
+        })
+
+    body_metrics_df = pd.DataFrame(bm_entries)
+
+    return food_log_df, targets_df, body_metrics_df
 
 
-def load_data(force_refresh: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame, bool]:
+def load_data(force_refresh: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame, Optional[pd.DataFrame], bool]:
     """Load nutrition data from Google Sheets or fall back to mock data.
 
     Args:
         force_refresh: If True, clears cache and re-fetches from Google Sheets.
 
     Returns:
-        Tuple of (food_log_df, daily_targets_df, is_live).
+        Tuple of (food_log_df, daily_targets_df, body_metrics_df, is_live).
         is_live is True if data came from Google Sheets, False if mock.
+        body_metrics_df may be None if not available.
     """
     if force_refresh:
         _fetch_sheet_data.clear()
@@ -225,12 +292,12 @@ def load_data(force_refresh: bool = False) -> Tuple[pd.DataFrame, pd.DataFrame, 
 
     if sheet_id and creds:
         try:
-            food_log_df, targets_df = _fetch_sheet_data(sheet_id)
-            return food_log_df, targets_df, True
+            food_log_df, targets_df, body_metrics_df = _fetch_sheet_data(sheet_id)
+            return food_log_df, targets_df, body_metrics_df, True
         except Exception as e:
             st.warning(f"Could not load Google Sheets data: {e}. Using mock data instead.")
-            mock_df, mock_targets = _generate_mock_data()
-            return mock_df, mock_targets, False
+            mock_df, mock_targets, mock_bm = _generate_mock_data()
+            return mock_df, mock_targets, mock_bm, False
     else:
-        mock_df, mock_targets = _generate_mock_data()
-        return mock_df, mock_targets, False
+        mock_df, mock_targets, mock_bm = _generate_mock_data()
+        return mock_df, mock_targets, mock_bm, False

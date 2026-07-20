@@ -15,21 +15,31 @@ class NutrientConfig:
     unit: str
     default_target: float
     nutrient_type: str  # 'target' or 'limit'
-    category: str       # 'macro', 'vitamin', 'mineral', 'other'
+    category: str       # 'macro', 'vitamin', 'mineral', 'fat_detail', 'other'
     display_precision: int = 1
 
 
 # Default daily targets / limits when Google Sheet is unavailable.
 DEFAULT_NUTRIENTS: Dict[str, NutrientConfig] = {
-    # Macronutrients
+    # ─── Macronutrients ───
     "Calories_kcal": NutrientConfig("Calories", "kcal", 2200.0, "target", "macro", 0),
     "Protein_g": NutrientConfig("Protein", "g", 120.0, "target", "macro", 1),
     "Carbs_g": NutrientConfig("Carbohydrates", "g", 250.0, "target", "macro", 1),
     "Fat_g": NutrientConfig("Fat", "g", 70.0, "target", "macro", 1),
     "Fiber_g": NutrientConfig("Fiber", "g", 35.0, "target", "macro", 1),
-    "Sugar_g": NutrientConfig("Sugar", "g", 50.0, "limit", "macro", 1),
+    "Sugar_g": NutrientConfig("Total Sugar", "g", 50.0, "limit", "macro", 1),
+    "Added_Sugar_g": NutrientConfig("Added Sugar", "g", 25.0, "limit", "macro", 1),
 
-    # Vitamins
+    # ─── Detailed Fats ───
+    "Saturated_Fat_g": NutrientConfig("Saturated Fat", "g", 20.0, "limit", "fat_detail", 1),
+    "Trans_Fat_g": NutrientConfig("Trans Fat", "g", 2.0, "limit", "fat_detail", 1),
+    "Mono_Fat_g": NutrientConfig("Monounsaturated Fat", "g", 44.0, "target", "fat_detail", 1),
+    "Poly_Fat_g": NutrientConfig("Polyunsaturated Fat", "g", 22.0, "target", "fat_detail", 1),
+    "Omega_3_g": NutrientConfig("Omega-3", "g", 2.0, "target", "fat_detail", 1),
+    "Omega_6_g": NutrientConfig("Omega-6", "g", 17.0, "target", "fat_detail", 1),
+    "Cholesterol_mg": NutrientConfig("Cholesterol", "mg", 300.0, "limit", "fat_detail", 0),
+
+    # ─── Vitamins ───
     "Vitamin_A_mcg": NutrientConfig("Vitamin A", "mcg", 900.0, "target", "vitamin", 1),
     "Vitamin_B12_mcg": NutrientConfig("Vitamin B12", "mcg", 2.4, "target", "vitamin", 1),
     "Vitamin_C_mg": NutrientConfig("Vitamin C", "mg", 90.0, "target", "vitamin", 1),
@@ -37,25 +47,30 @@ DEFAULT_NUTRIENTS: Dict[str, NutrientConfig] = {
     "Vitamin_E_mg": NutrientConfig("Vitamin E", "mg", 15.0, "target", "vitamin", 1),
     "Vitamin_K_mcg": NutrientConfig("Vitamin K", "mcg", 120.0, "target", "vitamin", 1),
     "Folate_mcg": NutrientConfig("Folate", "mcg", 400.0, "target", "vitamin", 1),
+    "Thiamin_mg": NutrientConfig("Thiamin B1", "mg", 1.2, "target", "vitamin", 1),
+    "Riboflavin_mg": NutrientConfig("Riboflavin B2", "mg", 1.3, "target", "vitamin", 1),
+    "Niacin_mg": NutrientConfig("Niacin B3", "mg", 16.0, "target", "vitamin", 1),
+    "Vitamin_B6_mg": NutrientConfig("Vitamin B6", "mg", 1.3, "target", "vitamin", 1),
+    "Choline_mg": NutrientConfig("Choline", "mg", 550.0, "target", "vitamin", 0),
 
-    # Minerals
+    # ─── Minerals ───
     "Calcium_mg": NutrientConfig("Calcium", "mg", 1000.0, "target", "mineral", 0),
     "Iron_mg": NutrientConfig("Iron", "mg", 18.0, "target", "mineral", 1),
     "Magnesium_mg": NutrientConfig("Magnesium", "mg", 400.0, "target", "mineral", 0),
     "Potassium_mg": NutrientConfig("Potassium", "mg", 3500.0, "target", "mineral", 0),
     "Zinc_mg": NutrientConfig("Zinc", "mg", 11.0, "target", "mineral", 1),
     "Sodium_mg": NutrientConfig("Sodium", "mg", 2300.0, "limit", "mineral", 0),
+    "Phosphorus_mg": NutrientConfig("Phosphorus", "mg", 1250.0, "target", "mineral", 0),
+    "Copper_mg": NutrientConfig("Copper", "mg", 0.9, "target", "mineral", 1),
+    "Manganese_mg": NutrientConfig("Manganese", "mg", 2.3, "target", "mineral", 1),
+    "Selenium_mcg": NutrientConfig("Selenium", "mcg", 55.0, "target", "mineral", 0),
+    "Iodine_mcg": NutrientConfig("Iodine", "mcg", 150.0, "target", "mineral", 0),
 
-    # Other
-    "Saturated_Fat_g": NutrientConfig("Saturated Fat", "g", 20.0, "limit", "other", 1),
-    "Cholesterol_mg": NutrientConfig("Cholesterol", "mg", 300.0, "limit", "other", 0),
-    "Omega_3_g": NutrientConfig("Omega-3", "g", 2.0, "target", "other", 1),
+    # ─── Other ───
     "Water_ml": NutrientConfig("Water", "ml", 2500.0, "target", "other", 0),
 }
 
 # Map user's actual Google Sheet column names to our internal keys.
-# Keys = user's column headers, Values = our internal keys.
-# Columns not listed here are ignored. Missing mapped columns default to 0.
 FOOD_LOG_COLUMN_MAP = {
     "Date": "Date",
     "Meal": "Meal",
@@ -66,23 +81,38 @@ FOOD_LOG_COLUMN_MAP = {
     "Carbs (g)": "Carbs_g",
     "Fiber (g)": "Fiber_g",
     "Total Sugar (g)": "Sugar_g",
+    "Added Sugar (g)": "Added_Sugar_g",
     "Fat (g)": "Fat_g",
     "Saturated Fat (g)": "Saturated_Fat_g",
+    "Trans Fat (g)": "Trans_Fat_g",
+    "Monounsaturated Fat (g)": "Mono_Fat_g",
+    "Polyunsaturated Fat (g)": "Poly_Fat_g",
+    "Omega-3 (g)": "Omega_3_g",
+    "Omega-6 (g)": "Omega_6_g",
     "Cholesterol (mg)": "Cholesterol_mg",
     "Sodium (mg)": "Sodium_mg",
     "Potassium (mg)": "Potassium_mg",
     "Calcium (mg)": "Calcium_mg",
     "Iron (mg)": "Iron_mg",
     "Magnesium (mg)": "Magnesium_mg",
+    "Phosphorus (mg)": "Phosphorus_mg",
     "Zinc (mg)": "Zinc_mg",
+    "Copper (mg)": "Copper_mg",
+    "Manganese (mg)": "Manganese_mg",
+    "Selenium (mcg)": "Selenium_mcg",
+    "Iodine (mcg)": "Iodine_mcg",
     "Vitamin A (mcg RAE)": "Vitamin_A_mcg",
     "Vitamin C (mg)": "Vitamin_C_mg",
     "Vitamin D (mcg)": "Vitamin_D_mcg",
     "Vitamin E (mg)": "Vitamin_E_mg",
     "Vitamin K (mcg)": "Vitamin_K_mcg",
+    "Thiamin B1 (mg)": "Thiamin_mg",
+    "Riboflavin B2 (mg)": "Riboflavin_mg",
+    "Niacin B3 (mg)": "Niacin_mg",
+    "Vitamin B6 (mg)": "Vitamin_B6_mg",
     "Folate B9 (mcg DFE)": "Folate_mcg",
     "Vitamin B12 (mcg)": "Vitamin_B12_mcg",
-    "Omega-3 (g)": "Omega_3_g",
+    "Choline (mg)": "Choline_mg",
     "Water (ml)": "Water_ml",
 }
 
@@ -98,6 +128,7 @@ MEAL_ORDER = ["Breakfast", "Lunch", "Snacks", "Dinner", "Other"]
 # Nutrient categories for grouping display
 VITAMIN_KEYS = [k for k, v in DEFAULT_NUTRIENTS.items() if v.category == "vitamin"]
 MINERAL_KEYS = [k for k, v in DEFAULT_NUTRIENTS.items() if v.category == "mineral"]
+FAT_DETAIL_KEYS = [k for k, v in DEFAULT_NUTRIENTS.items() if v.category == "fat_detail"]
 OTHER_KEYS = [k for k, v in DEFAULT_NUTRIENTS.items() if v.category == "other"]
 MACRO_KEYS = [k for k, v in DEFAULT_NUTRIENTS.items() if v.category == "macro"]
 
