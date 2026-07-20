@@ -82,7 +82,7 @@ def render_calorie_trend_chart(trend_df: pd.DataFrame) -> None:
     ))
 
     fig = _base_layout(fig, "Calorie Trend")
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="chart_calorie_trend")
 
 
 # ─── Protein Trend ───
@@ -112,7 +112,7 @@ def render_protein_trend_chart(trend_df: pd.DataFrame) -> None:
     ))
 
     fig = _base_layout(fig, "Protein Trend")
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="chart_protein_trend")
 
 
 # ─── Macro Distribution Over Time (Stacked Area) ───
@@ -164,7 +164,7 @@ def render_macro_area_chart(trend_df: pd.DataFrame) -> None:
 
     fig = _base_layout(fig, "Macro Energy Distribution")
     fig.update_layout(yaxis_title="kcal")
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="chart_macro_area")
 
 
 # ─── Fiber Trend ───
@@ -199,7 +199,7 @@ def render_fiber_trend_chart(trend_df: pd.DataFrame) -> None:
     ))
 
     fig = _base_layout(fig, "Fiber Trend")
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="chart_fiber_trend")
 
 
 # ─── Macro Distribution Pie (Single Day) ───
@@ -242,7 +242,7 @@ def render_macro_pie_chart(summary: Dict[str, Any]) -> None:
             font_color=_TEXT_COLOR,
         )],
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="chart_macro_pie")
 
 
 # ─── Nutrient Adequacy Heatmap ───
@@ -252,12 +252,10 @@ def render_nutrient_heatmap(heatmap_df: pd.DataFrame) -> None:
         st.info("No data for nutrient heatmap.")
         return
 
-    # Prepare data: rows = dates, columns = nutrients
     dates = heatmap_df["Date"].tolist()
     nutrients = [c for c in heatmap_df.columns if c != "Date"]
     z_values = heatmap_df[nutrients].values
 
-    # Rename columns to labels
     nutrient_labels = [get_nutrient_label(k) for k in nutrients]
 
     fig = go.Figure(data=go.Heatmap(
@@ -284,7 +282,7 @@ def render_nutrient_heatmap(heatmap_df: pd.DataFrame) -> None:
         plot_bgcolor="rgba(0,0,0,0)",
         yaxis=dict(autorange="reversed"),
     )
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="chart_nutrient_heatmap")
 
 
 # ─── Body Metric Trend ───
@@ -314,7 +312,6 @@ def render_body_metric_chart(
         hovertemplate=f"%{{x}}<br>{label}: %{{y:.1f}} {unit}<extra></extra>",
     ))
 
-    # 7-day moving average
     if show_ma and len(trend_df) >= 7:
         ma = trend_df[metric_key].rolling(window=7, min_periods=1).mean()
         fig.add_trace(go.Scatter(
@@ -328,7 +325,7 @@ def render_body_metric_chart(
 
     fig = _base_layout(fig, label, height=320)
     fig.update_layout(xaxis_title="Date", yaxis_title=unit)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"chart_body_{metric_key}")
 
 
 # ─── Body Composition Multi-Chart ───

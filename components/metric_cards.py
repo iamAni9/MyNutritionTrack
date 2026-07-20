@@ -47,7 +47,7 @@ def _card_container(content: str) -> str:
     """)
 
 
-def render_score_card(title: str, score: float, max_score: float = 100.0, unit: str = "") -> None:
+def render_score_card(title: str, score: float, max_score: float = 100.0, unit: str = "", key: str = "") -> None:
     """Render a professional score card with circular indicator."""
     pct = min(score / max_score * 100, 100)
     if pct >= 80:
@@ -98,7 +98,7 @@ def render_score_card(title: str, score: float, max_score: float = 100.0, unit: 
         box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
             <div style="font-size: 0.85rem; color: #6b7280; font-weight: 600; margin-bottom: 0.5rem;">{title}</div>
     """), unsafe_allow_html=True)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key=f"score_{key}_{title}")
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -165,7 +165,7 @@ def render_calorie_card(summary: Dict[str, Any]) -> None:
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False}, key="calorie_donut")
 
 
 def render_macro_card(key: str, summary: Dict[str, Any]) -> None:

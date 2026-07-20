@@ -233,14 +233,14 @@ def render_dashboard_tab(
     col1, col2, col3 = st.columns(3)
     with col1:
         adequacy = compute_nutrient_adequacy_score(daily_summary)
-        render_score_card("Nutrient Adequacy", adequacy, 100, "%")
+        render_score_card("Nutrient Adequacy", adequacy, 100, "%", key="adequacy")
     with col2:
         quality = compute_calorie_quality_index(daily_summary)
-        render_score_card("Calorie Quality", quality, 100, "")
+        render_score_card("Calorie Quality", quality, 100, "", key="quality")
     with col3:
         macro_dist = compute_macro_distribution(daily_summary)
         protein_pct = macro_dist.get("Protein", 0)
-        render_score_card("Protein Ratio", protein_pct, 40, "%")
+        render_score_card("Protein Ratio", protein_pct, 40, "%", key="protein_ratio")
 
     # ─── Macronutrients ───
     st.markdown('<div class="section-header">🥩 Macronutrients</div>', unsafe_allow_html=True)
